@@ -2370,6 +2370,15 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
   .grupo-cab.portada .grupo-fondo { display: none !important; }
 }
 @media (prefers-reduced-motion: reduce) { .grupo-menu.entra .cab-foto { animation: none; } }
+
+/* Pedido a domicilio: celular y desglose de desechables */
+.campo-p input[type=tel] { width: 100%; font: inherit; font-size: 0.92rem; color: var(--carbon); background: var(--gris); border: 1px solid var(--gris-linea); border-radius: 10px; padding: 11px 12px; font-variant-numeric: tabular-nums; }
+.ayuda-campo { font-size: 0.76rem; color: var(--texto-suave); line-height: 1.45; }
+.desglose { margin-top: 18px; display: grid; gap: 6px; font-size: 0.86rem; }
+.desglose[hidden] { display: none; }
+.desglose > div { display: flex; justify-content: space-between; gap: 12px; color: var(--texto-suave); }
+.desglose > div span:last-child { color: var(--carbon); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nota-domicilio { margin-top: 4px; font-size: 0.74rem; line-height: 1.45; color: var(--texto-suave); }
 </style>
 </head>
 <body>
@@ -2783,8 +2792,14 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
       <div class="campo-p"><label for="pNombre">Tu nombre</label><input type="text" id="pNombre" autocomplete="name" maxlength="60"></div>
       <fieldset class="campo-p"><legend>¿Cómo lo recibes?</legend><div class="seg" id="pEntregas"></div></fieldset>
       <div class="campo-p" id="campoDireccion" hidden><label for="pDireccion">Dirección de entrega</label><input type="text" id="pDireccion" autocomplete="street-address" maxlength="120" placeholder="Barrio, calle y número"></div>
+      <div class="campo-p" id="campoCelular" hidden><label for="pCelular">Celular de contacto</label><input type="tel" id="pCelular" autocomplete="tel-national" inputmode="numeric" maxlength="16" placeholder="Ej.: 300 123 4567" aria-describedby="ayudaCelular"><small class="ayuda-campo" id="ayudaCelular">El domiciliario te llamará a este número cuando llegue o si necesita indicaciones.</small></div>
       <div class="campo-p"><label for="pNotas">Notas (opcional)</label><textarea id="pNotas" maxlength="200" placeholder="Ej.: batido sin azúcar, leche de almendras"></textarea></div>
       <p class="cerrado-aviso" id="cerradoAviso" hidden></p>
+      <div class="desglose" id="pDesglose" hidden>
+        <div><span>Productos</span><span id="pSubtotal">$0</span></div>
+        <div><span id="pDesechablesTxt">Desechables</span><span id="pDesechables">$0</span></div>
+        <p class="nota-domicilio">Desechables por domicilio: $1.500 por plato y $600 por bebida preparada. El valor del envío te lo confirmamos por WhatsApp.</p>
+      </div>
       <div class="totales"><span>Total</span><b id="pTotal">$0</b></div>
       <p class="error-pedido" id="pError" role="alert"></p>
       <button class="enviar-pedido" id="enviarPedido" type="button"><svg aria-hidden="true"><use href="#i-wa"/></svg>Enviar pedido por WhatsApp</button>
@@ -3548,7 +3563,7 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
   var ENTREGAS = ["Recoger en el local", "Domicilio"], ENTREGA_CON_DIRECCION = "Domicilio";
   var porId = {}; productos.forEach(function (p) { porId[p.id] = p; });
   var $c = function (s) { return document.querySelector(s); };
-  var pedido = { items: {}, nombre: "", entrega: ENTREGAS[0], direccion: "", notas: "", enviado: null };
+  var pedido = { items: {}, nombre: "", entrega: ENTREGAS[0], direccion: "", celular: "", notas: "", enviado: null };
 
   // Opciones de cada línea del pedido (clave "id~opción~opción"): acompañamiento, bebida, proteína…
   function conMin(x) { return "con " + x.toLowerCase(); }
@@ -3598,11 +3613,39 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
         var q = Math.floor(Number(g.items[id]));
         if (claveValida(id) && q > 0) pedido.items[id] = Math.min(MAX_POR_PRODUCTO, q);
       });
-      ["nombre", "direccion", "notas"].forEach(function (k) { if (typeof pedido[k] !== "string") pedido[k] = ""; });
+      ["nombre", "direccion", "celular", "notas"].forEach(function (k) { if (typeof pedido[k] !== "string") pedido[k] = ""; });
       if (ENTREGAS.indexOf(pedido.entrega) < 0) pedido.entrega = ENTREGAS[0];
     } catch (e) {}
   }
   function guardarPedido() { try { localStorage.setItem(LLAVE, JSON.stringify(pedido)); } catch (e) {} }
+  // Desechables en domicilio: $1.500 por plato y $600 por bebida preparada
+  var DESECHABLE = { plato: 1500, bebida: 600 };
+  var CATS_PLATO = ["desayunos", "especialidades", "sandwich", "snacks"], CATS_BEBIDA = ["batidos", "calientes"];
+  function tipoDesechable(p) {
+    if (!p || p.adicion || p.tag === "Tiqueteras") return "";
+    if (CATS_PLATO.indexOf(p.cat) >= 0) return "plato";
+    if (CATS_BEBIDA.indexOf(p.cat) >= 0 || (p.cat === "frias" && p.tag === "Preparadas")) return "bebida";
+    return "";
+  }
+  function desechables() {
+    var d = { platos: 0, bebidas: 0, valor: 0 };
+    if (pedido.entrega !== ENTREGA_CON_DIRECCION) return d;
+    Object.keys(pedido.items).forEach(function (id) {
+      var t = tipoDesechable(porId[baseId(id)]), q = pedido.items[id];
+      if (t === "plato") d.platos += q; else if (t === "bebida") d.bebidas += q;
+    });
+    d.valor = d.platos * DESECHABLE.plato + d.bebidas * DESECHABLE.bebida;
+    return d;
+  }
+  function textoDesechables(d) {
+    var p = [];
+    if (d.platos) p.push(d.platos + (d.platos === 1 ? " plato" : " platos") + " × " + cop(DESECHABLE.plato));
+    if (d.bebidas) p.push(d.bebidas + (d.bebidas === 1 ? " bebida" : " bebidas") + " × " + cop(DESECHABLE.bebida));
+    return p.join(" + ");
+  }
+  function celularLimpio(v) { var d = String(v || "").replace(/\D/g, ""); if (d.length === 12 && d.indexOf("57") === 0) d = d.slice(2); return d; }
+  function celularValido(v) { return /^3\d{9}$/.test(celularLimpio(v)); }
+  function celularBonito(v) { var d = celularLimpio(v); return d.length === 10 ? d.slice(0, 3) + " " + d.slice(3, 6) + " " + d.slice(6) : String(v || "").trim(); }
   function resumen() {
     var n = 0, total = 0;
     Object.keys(pedido.items).forEach(function (id) { n += pedido.items[id]; total += porId[baseId(id)].precio * pedido.items[id]; });
@@ -3674,7 +3717,7 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
     $c("#barraPedido").hidden = r.n === 0;
     document.body.classList.toggle("con-barra", r.n > 0);
     $c("#barraTexto").textContent = "Ver pedido · " + r.n + (r.n === 1 ? " producto" : " productos");
-    $c("#barraTotal").textContent = cop(r.total);
+    $c("#barraTotal").textContent = cop(r.total + desechables().valor);
     $c("#carritoN").textContent = r.n;
     btn.classList.toggle("lleno", r.n > 0);
     btn.setAttribute("aria-label", r.n ? "Ver tu pedido, " + r.n + (r.n === 1 ? " producto" : " productos") : "Ver tu pedido");
@@ -3703,8 +3746,7 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
     pintarSugerencias();
     $c("#vacioPedido").hidden = r.n > 0;
     $c("#formPedido").hidden = r.n === 0;
-    $c("#pTotal").textContent = cop(r.total);
-    $c("#campoDireccion").hidden = pedido.entrega !== ENTREGA_CON_DIRECCION;
+    pintarTotales(r);
     var h = estadoHorario();
     $c("#cerradoAviso").hidden = h.abierto;
     $c("#cerradoAviso").textContent = "Ahora estamos cerrados. Puedes enviar tu pedido y te respondemos " + (h.despues ? "mañana desde las " + horaTxt(h.abreManana) : "hoy desde las " + horaTxt(h.abreHoy)) + ".";
@@ -3830,8 +3872,20 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
         '<button type="button" class="agregar sug-btn" data-mas="' + x[0] + '" aria-label="Agregar ' + x[1] + ' por ' + cop(p.precio) + '">+ Agregar</button></li>';
     }).join("");
   }
+  function pintarTotales(r) {
+    r = r || resumen();
+    var dom = pedido.entrega === ENTREGA_CON_DIRECCION, d = desechables();
+    $c("#campoDireccion").hidden = !dom;
+    $c("#campoCelular").hidden = !dom;
+    $c("#pDesglose").hidden = !dom;
+    $c("#pSubtotal").textContent = cop(r.total);
+    $c("#pDesechablesTxt").textContent = "Desechables" + (d.valor ? " (" + textoDesechables(d) + ")" : "");
+    $c("#pDesechables").textContent = cop(d.valor);
+    $c("#pTotal").textContent = cop(r.total + d.valor);
+    $c("#barraTotal").textContent = cop(r.total + d.valor);
+  }
   function abrirHoja() {
-    $c("#pNombre").value = pedido.nombre; $c("#pDireccion").value = pedido.direccion; $c("#pNotas").value = pedido.notas;
+    $c("#pNombre").value = pedido.nombre; $c("#pDireccion").value = pedido.direccion; $c("#pCelular").value = pedido.celular; $c("#pNotas").value = pedido.notas;
     $c("#pError").textContent = "";
     pintarHoja();
     $c("#hojaPedido").showModal();
@@ -3842,25 +3896,28 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
   });
   $c("#pEntregas").addEventListener("change", function (e) {
     pedido.entrega = e.target.value; guardarPedido();
-    $c("#campoDireccion").hidden = pedido.entrega !== ENTREGA_CON_DIRECCION;
+    pintarTotales(); $c("#pError").textContent = "";
   });
-  [["pNombre", "nombre"], ["pDireccion", "direccion"], ["pNotas", "notas"]].forEach(function (par) {
+  [["pNombre", "nombre"], ["pDireccion", "direccion"], ["pCelular", "celular"], ["pNotas", "notas"]].forEach(function (par) {
     $c("#" + par[0]).addEventListener("input", function () { pedido[par[1]] = this.value; guardarPedido(); $c("#pError").textContent = ""; });
   });
 
   function mensajePedido() {
     var r = resumen();
     var lineas = Object.keys(pedido.items).map(function (id) { var p = porId[baseId(id)], q = pedido.items[id]; return "- " + q + " x " + nombreLinea(id) + " (" + cop(p.precio * q) + ")"; });
-    var partes = [msgBase, "", "*Pedido*"].concat(lineas, ["", "*Total:* " + cop(r.total), "*Nombre:* " + pedido.nombre.trim(), "*Entrega:* " + pedido.entrega]);
-    if (pedido.entrega === ENTREGA_CON_DIRECCION) partes.push("*Dirección:* " + pedido.direccion.trim());
+    var d = desechables(), dom = pedido.entrega === ENTREGA_CON_DIRECCION;
+    var totales = dom ? ["", "*Productos:* " + cop(r.total), "*Desechables:* " + (d.valor ? textoDesechables(d) + " = " + cop(d.valor) : cop(0)), "*Total:* " + cop(r.total + d.valor) + " (más el valor del envío)"] : ["", "*Total:* " + cop(r.total)];
+    var partes = [msgBase, "", "*Pedido*"].concat(lineas, totales, ["*Nombre:* " + pedido.nombre.trim(), "*Entrega:* " + pedido.entrega]);
+    if (dom) { partes.push("*Dirección:* " + pedido.direccion.trim()); partes.push("*Celular:* " + celularBonito(pedido.celular)); }
     if (pedido.notas.trim()) partes.push("*Notas:* " + pedido.notas.trim());
     return partes.join("\n");
   }
   $c("#enviarPedido").addEventListener("click", function () {
     var err = $c("#pError"); err.textContent = "";
-    pedido.nombre = $c("#pNombre").value; pedido.direccion = $c("#pDireccion").value; pedido.notas = $c("#pNotas").value;
+    pedido.nombre = $c("#pNombre").value; pedido.direccion = $c("#pDireccion").value; pedido.celular = $c("#pCelular").value; pedido.notas = $c("#pNotas").value;
     if (pedido.nombre.trim().length < 2) { err.textContent = "Escribe tu nombre para enviar el pedido."; $c("#pNombre").focus(); return; }
     if (pedido.entrega === ENTREGA_CON_DIRECCION && pedido.direccion.trim().length < 5) { err.textContent = "Escribe la dirección donde recibirás el pedido."; $c("#pDireccion").focus(); return; }
+    if (pedido.entrega === ENTREGA_CON_DIRECCION && !celularValido(pedido.celular)) { err.textContent = "Escribe un celular de 10 dígitos que empiece por 3 (ej.: 300 123 4567) para que el domiciliario pueda llamarte."; $c("#pCelular").focus(); return; }
     var url = waUrl(mensajePedido());
     // window.open con "noopener" devuelve siempre null; por eso se quita el opener después.
     var v = window.open(url, "_blank");
@@ -4112,7 +4169,7 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
       if (tiene(q, / (donde|ubicacion|ubicados|direccion|llegar|queda|quedan|mapa|local|sede) /))
         return { txt: ["Estamos en la <b>Calle 20 (Av. de los Estudiantes) #38-31</b>, Pasto, cerca de Smart Fit Bulevar de la Avenida."], chips: [{ t: "Cómo llegar", href: "https://www.google.com/maps/dir/?api=1&destination=1.227815,-77.2831963" }, { t: "Ver el mapa", ir: "#encuentranos" }, "Horario"] };
       if (tiene(q, / (domicilio|domicilios|envio|envios|envian|llevan|delivery|a domicilio) /))
-        return { txt: ["Sí, hacemos domicilios en Pasto.", "Agrega lo que quieras, abre tu pedido, elige <b>Domicilio</b> y escribe tu dirección. Al enviarlo por WhatsApp te confirmamos el valor del envío y el tiempo de entrega."], chips: chipPedido.concat(["Recomiéndame algo"]) };
+        return { txt: ["Sí, hacemos domicilios en Pasto.", "Agrega lo que quieras, abre tu pedido, elige <b>Domicilio</b> y escribe tu dirección y tu celular, para que el domiciliario pueda llamarte.", "Los desechables cuestan $1.500 por plato y $600 por bebida preparada. El valor del envío y el tiempo de entrega te los confirmamos por WhatsApp."], chips: chipPedido.concat(["Recomiéndame algo"]) };
       if (tiene(q, / (pago|pagar|pagos|nequi|daviplata|tarjeta|efectivo|transferencia|bancolombia) /))
         return { txt: ["Los medios de pago te los confirmamos por WhatsApp cuando envíes tu pedido."], chips: [{ t: "Escribir por WhatsApp", href: WA }] };
       if (tiene(q, / (whatsapp|asesor|asesora|persona|humano|alguien|llamar|telefono|celular|numero|contacto) /))
