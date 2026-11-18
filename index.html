@@ -2798,7 +2798,7 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
       <div class="desglose" id="pDesglose" hidden>
         <div><span>Productos</span><span id="pSubtotal">$0</span></div>
         <div><span id="pDesechablesTxt">Desechables</span><span id="pDesechables">$0</span></div>
-        <p class="nota-domicilio">Desechables por domicilio: $1.500 por plato y $600 por bebida preparada. El valor del envío te lo confirmamos por WhatsApp.</p>
+        <p class="nota-domicilio" id="notaDesechables"></p>
       </div>
       <div class="totales"><span>Total</span><b id="pTotal">$0</b></div>
       <p class="error-pedido" id="pError" role="alert"></p>
@@ -3560,7 +3560,7 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
 
   /* ======================== CARRITO DE PEDIDO ======================== */
   var LLAVE = "nutrifit-pedido-v1", MAX_POR_PRODUCTO = 20;
-  var ENTREGAS = ["Recoger en el local", "Domicilio"], ENTREGA_CON_DIRECCION = "Domicilio";
+  var ENTREGAS = ["Recoger en el local", "Domicilio", "Comer en el restaurante"], ENTREGA_CON_DIRECCION = "Domicilio", ENTREGA_EN_MESA = "Comer en el restaurante";
   var porId = {}; productos.forEach(function (p) { porId[p.id] = p; });
   var $c = function (s) { return document.querySelector(s); };
   var pedido = { items: {}, nombre: "", entrega: ENTREGAS[0], direccion: "", celular: "", notas: "", enviado: null };
@@ -3618,7 +3618,7 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
     } catch (e) {}
   }
   function guardarPedido() { try { localStorage.setItem(LLAVE, JSON.stringify(pedido)); } catch (e) {} }
-  // Desechables en domicilio: $1.500 por plato y $600 por bebida preparada
+  // Desechables para llevar (recoger o domicilio): $1.500 por plato y $600 por bebida preparada. Comer en el restaurante no los paga.
   var DESECHABLE = { plato: 1500, bebida: 600 };
   var CATS_PLATO = ["desayunos", "especialidades", "sandwich", "snacks"], CATS_BEBIDA = ["batidos", "calientes"];
   function tipoDesechable(p) {
@@ -3629,7 +3629,7 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
   }
   function desechables() {
     var d = { platos: 0, bebidas: 0, valor: 0 };
-    if (pedido.entrega !== ENTREGA_CON_DIRECCION) return d;
+    if (pedido.entrega === ENTREGA_EN_MESA) return d;
     Object.keys(pedido.items).forEach(function (id) {
       var t = tipoDesechable(porId[baseId(id)]), q = pedido.items[id];
       if (t === "plato") d.platos += q; else if (t === "bebida") d.bebidas += q;
@@ -3874,10 +3874,11 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
   }
   function pintarTotales(r) {
     r = r || resumen();
-    var dom = pedido.entrega === ENTREGA_CON_DIRECCION, d = desechables();
+    var dom = pedido.entrega === ENTREGA_CON_DIRECCION, llevar = pedido.entrega !== ENTREGA_EN_MESA, d = desechables();
     $c("#campoDireccion").hidden = !dom;
     $c("#campoCelular").hidden = !dom;
-    $c("#pDesglose").hidden = !dom;
+    $c("#pDesglose").hidden = !llevar;
+    $c("#notaDesechables").textContent = "Para llevar se cobran desechables: $1.500 por plato y $600 por bebida preparada." + (dom ? " El valor del envío te lo confirmamos por WhatsApp." : "");
     $c("#pSubtotal").textContent = cop(r.total);
     $c("#pDesechablesTxt").textContent = "Desechables" + (d.valor ? " (" + textoDesechables(d) + ")" : "");
     $c("#pDesechables").textContent = cop(d.valor);
@@ -3905,8 +3906,8 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
   function mensajePedido() {
     var r = resumen();
     var lineas = Object.keys(pedido.items).map(function (id) { var p = porId[baseId(id)], q = pedido.items[id]; return "- " + q + " x " + nombreLinea(id) + " (" + cop(p.precio * q) + ")"; });
-    var d = desechables(), dom = pedido.entrega === ENTREGA_CON_DIRECCION;
-    var totales = dom ? ["", "*Productos:* " + cop(r.total), "*Desechables:* " + (d.valor ? textoDesechables(d) + " = " + cop(d.valor) : cop(0)), "*Total:* " + cop(r.total + d.valor) + " (más el valor del envío)"] : ["", "*Total:* " + cop(r.total)];
+    var d = desechables(), dom = pedido.entrega === ENTREGA_CON_DIRECCION, llevar = pedido.entrega !== ENTREGA_EN_MESA;
+    var totales = llevar ? ["", "*Productos:* " + cop(r.total), "*Desechables:* " + (d.valor ? textoDesechables(d) + " = " + cop(d.valor) : cop(0)), "*Total:* " + cop(r.total + d.valor) + (dom ? " (más el valor del envío)" : "")] : ["", "*Total:* " + cop(r.total)];
     var partes = [msgBase, "", "*Pedido*"].concat(lineas, totales, ["*Nombre:* " + pedido.nombre.trim(), "*Entrega:* " + pedido.entrega]);
     if (dom) { partes.push("*Dirección:* " + pedido.direccion.trim()); partes.push("*Celular:* " + celularBonito(pedido.celular)); }
     if (pedido.notas.trim()) partes.push("*Notas:* " + pedido.notas.trim());
@@ -4169,13 +4170,13 @@ body.asis-compacto .asis-btn span { position: absolute; width: 1px; height: 1px;
       if (tiene(q, / (donde|ubicacion|ubicados|direccion|llegar|queda|quedan|mapa|local|sede) /))
         return { txt: ["Estamos en la <b>Calle 20 (Av. de los Estudiantes) #38-31</b>, Pasto, cerca de Smart Fit Bulevar de la Avenida."], chips: [{ t: "Cómo llegar", href: "https://www.google.com/maps/dir/?api=1&destination=1.227815,-77.2831963" }, { t: "Ver el mapa", ir: "#encuentranos" }, "Horario"] };
       if (tiene(q, / (domicilio|domicilios|envio|envios|envian|llevan|delivery|a domicilio) /))
-        return { txt: ["Sí, hacemos domicilios en Pasto.", "Agrega lo que quieras, abre tu pedido, elige <b>Domicilio</b> y escribe tu dirección y tu celular, para que el domiciliario pueda llamarte.", "Los desechables cuestan $1.500 por plato y $600 por bebida preparada. El valor del envío y el tiempo de entrega te los confirmamos por WhatsApp."], chips: chipPedido.concat(["Recomiéndame algo"]) };
+        return { txt: ["Sí, hacemos domicilios en Pasto.", "Agrega lo que quieras, abre tu pedido, elige <b>Domicilio</b> y escribe tu dirección y tu celular, para que el domiciliario pueda llamarte.", "Para llevar (domicilio o recoger) se cobran desechables: $1.500 por plato y $600 por bebida preparada. Si comes en el restaurante no se cobran. El valor del envío y el tiempo de entrega te los confirmamos por WhatsApp."], chips: chipPedido.concat(["Recomiéndame algo"]) };
       if (tiene(q, / (pago|pagar|pagos|nequi|daviplata|tarjeta|efectivo|transferencia|bancolombia) /))
         return { txt: ["Los medios de pago te los confirmamos por WhatsApp cuando envíes tu pedido."], chips: [{ t: "Escribir por WhatsApp", href: WA }] };
       if (tiene(q, / (whatsapp|asesor|asesora|persona|humano|alguien|llamar|telefono|celular|numero|contacto) /))
         return { txt: ["Puedes escribirnos o llamarnos al <b>301 647 2012</b>. Te atiende una persona del equipo."], chips: [{ t: "Abrir WhatsApp", href: WA }] };
       if (tiene(q, / (como pido|como hago|hacer (un |el )?pedido|pedir|ordenar|mi pedido|carrito|como compro) /) && !buscar(t).length)
-        return { txt: ["Es fácil: toca <b>+ Agregar</b> en lo que quieras (también puedes hacerlo aquí), abre tu pedido, escribe tu nombre y elige recoger o domicilio. El pedido se envía por WhatsApp."], chips: chipPedido.length ? chipPedido : ["Recomiéndame algo", { t: "Ver el menú", ir: "#menu" }] };
+        return { txt: ["Es fácil: toca <b>+ Agregar</b> en lo que quieras (también puedes hacerlo aquí), abre tu pedido, escribe tu nombre y elige recoger, domicilio o comer en el restaurante. El pedido se envía por WhatsApp."], chips: chipPedido.length ? chipPedido : ["Recomiéndame algo", { t: "Ver el menú", ir: "#menu" }] };
       if (tiene(q, / (masa|musculo|musculos|muscular|volumen|subir de peso|ganar peso|aumentar|hipertrofia) /))
         return { txt: ["Para ganar masa muscular te sirven opciones altas en proteína:", "Puedes sumar <b>doble proteína</b> a cualquier plato o batido."], prods: ["king-kong", "el-clasico", "bowl-de-res", "parrilla-mixta", "ad-batidos-scoop-de-proteina"], chips: [{ t: "Ver proteínas", ir: "#suplementos-proteinas" }, { t: "Ver creatinas", ir: "#suplementos-creatinas" }] };
       if (tiene(q, / (bajar|adelgazar|perder|definir|definicion|dieta|ligero|ligera|liviano|light|caloria|calorias|grasa|saludable) /))
